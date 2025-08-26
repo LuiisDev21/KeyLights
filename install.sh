@@ -22,29 +22,63 @@ install_core(){
   sudo_wrap tee /usr/local/bin/scrolllockd.sh >/dev/null <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
+
+log(){ logger -t keylights "$*"; }
+
+have(){ command -v "$1" >/dev/null 2>&1; }
+
 apply_led(){
-  for tty in /dev/tty[1-12]; do
-    [[ -r "$tty" ]] && /usr/bin/setleds -D +scroll < "$tty" || true
-  done
+  local any=0
   if ls /sys/class/leds/*scrolllock* >/dev/null 2>&1; then
     for led in /sys/class/leds/*scrolllock*; do
-      [[ -w "$led/brightness" ]] && echo 1 > "$led/brightness" || true
+      if [ -w "$led/brightness" ]; then echo 1 > "$led/brightness" 2>/dev/null || true; any=1; fi
     done
   fi
+  for tty in /dev/tty[1-12]; do
+    [ -r "$tty" ] && /usr/bin/setleds -D +scroll < "$tty" 2>/dev/null || true
+  done
+  [ "$any" = 0 ] && log "no scrolllock leds in sysfs; relying on setleds"
 }
-burst_reapply(){
+
+burst(){
   apply_led; sleep 0.05; apply_led; sleep 0.10; apply_led
 }
-event_watcher(){
-  /usr/bin/udevadm monitor --kernel --udev --subsystem-match=leds --subsystem-match=input | \
-  stdbuf -oL awk '1' | while IFS= read -r _; do burst_reapply; done
+
+warmup(){
+  local end=$(( $(date +%s) + 8 ))
+  while [ "$(date +%s)" -lt "$end" ]; do
+    apply_led
+    sleep 0.2
+  done
+  log "warmup done"
 }
-periodic_refresh(){ while true; do apply_led; sleep 30; done; }
-fast_boot_warmup(){ end=$(( $(date +%s) + 8 )); while [ "$(date +%s)" -lt "$end" ]; do apply_led; sleep 0.2; done; }
-ensure_tools(){ command -v setleds >/dev/null 2>&1 || exit 1; command -v udevadm >/dev/null 2>&1 || exit 1; command -v awk >/dev/null 2>&1 || exit 1; command -v stdbuf >/dev/null 2>&1 || exit 1; }
+
+periodic(){
+  while true; do
+    apply_led
+    sleep 20
+  done
+}
+
+watch_events(){
+  if have udevadm && have awk && have stdbuf; then
+    log "using udev monitor"
+    /usr/bin/udevadm monitor --kernel --udev --subsystem-match=leds --subsystem-match=input | \
+      stdbuf -oL awk '1' | while IFS= read -r _; do burst; done
+  else
+    log "udev monitor unavailable; using fast periodic loop"
+    while true; do burst; sleep 1; done
+  fi
+}
+
 case "${1-}" in
-  --daemon) ensure_tools; fast_boot_warmup &; periodic_refresh &; event_watcher ;;
-  *) apply_led ;;
+  --daemon)
+    log "daemon starting"
+    warmup & periodic & watch_events
+    ;;
+  *)
+    apply_led
+    ;;
 esac
 SH
   sudo_wrap chmod +x /usr/local/bin/scrolllockd.sh
@@ -52,10 +86,12 @@ SH
   sudo_wrap tee /etc/systemd/system/scrolllockd.service >/dev/null <<'UNIT'
 [Unit]
 Description=Scroll Lock backlight daemon (KeyLights)
-After=local-fs.target
+After=systemd-udevd.service local-fs.target
+Wants=systemd-udevd.service
 
 [Service]
 Type=simple
+ExecStartPre=/usr/bin/udevadm settle --timeout=10
 ExecStart=/usr/local/bin/scrolllockd.sh --daemon
 Restart=always
 RestartSec=2
