@@ -8,12 +8,12 @@ sudo_wrap(){ if [[ $EUID -ne 0 ]]; then sudo "$@"; else "$@"; fi; }
 
 ensure_kbd(){
   if need_cmd setleds; then return; fi
-  echo -e "${YELLOW}Instalando 'kbd'...${NC}"
+  echo -e "${YELLOW}Installing 'kbd'...${NC}"
   if need_cmd apt; then sudo_wrap apt update -y && sudo_wrap apt install -y kbd
   elif need_cmd dnf; then sudo_wrap dnf install -y kbd
   elif need_cmd pacman; then sudo_wrap pacman -Sy --noconfirm kbd
   elif need_cmd zypper; then sudo_wrap zypper install -y kbd
-  else echo -e "${RED}Instala 'kbd' manualmente.${NC}"
+  else echo -e "${RED}Please install 'kbd' manually.${NC}"
   fi
 }
 
@@ -32,14 +32,18 @@ apply_led(){
     done
   fi
 }
-daemon_loop(){
-  while true; do
-    apply_led
-    sleep 5
-  done
+burst_reapply(){
+  apply_led; sleep 0.05; apply_led; sleep 0.10; apply_led
 }
+event_watcher(){
+  /usr/bin/udevadm monitor --kernel --udev --subsystem-match=leds --subsystem-match=input | \
+  stdbuf -oL awk '1' | while IFS= read -r _; do burst_reapply; done
+}
+periodic_refresh(){ while true; do apply_led; sleep 30; done; }
+fast_boot_warmup(){ end=$(( $(date +%s) + 8 )); while [ "$(date +%s)" -lt "$end" ]; do apply_led; sleep 0.2; done; }
+ensure_tools(){ command -v setleds >/dev/null 2>&1 || exit 1; command -v udevadm >/dev/null 2>&1 || exit 1; command -v awk >/dev/null 2>&1 || exit 1; command -v stdbuf >/dev/null 2>&1 || exit 1; }
 case "${1-}" in
-  --daemon) daemon_loop ;;
+  --daemon) ensure_tools; fast_boot_warmup &; periodic_refresh &; event_watcher ;;
   *) apply_led ;;
 esac
 SH
@@ -47,7 +51,7 @@ SH
 
   sudo_wrap tee /etc/systemd/system/scrolllockd.service >/dev/null <<'UNIT'
 [Unit]
-Description=Scroll Lock backlight daemon
+Description=Scroll Lock backlight daemon (KeyLights)
 After=local-fs.target
 
 [Service]
@@ -63,7 +67,7 @@ UNIT
 
   sudo_wrap systemctl daemon-reload
   sudo_wrap systemctl enable --now scrolllockd.service
-  echo -e "${GREEN}scrolllockd instalado y ejecutándose.${NC}"
+  echo -e "${GREEN}KeyLights daemon installed and running.${NC}"
 }
 
 uninstall_all(){
@@ -71,7 +75,7 @@ uninstall_all(){
   sudo_wrap rm -f /etc/systemd/system/scrolllockd.service
   sudo_wrap systemctl daemon-reload
   sudo_wrap rm -f /usr/local/bin/scrolllockd.sh
-  echo -e "${GREEN}Desinstalado.${NC}"
+  echo -e "${GREEN}KeyLights uninstalled.${NC}"
 }
 
 case "${1-}" in
