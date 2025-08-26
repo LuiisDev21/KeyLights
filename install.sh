@@ -22,62 +22,68 @@ install_core(){
   sudo_wrap tee /usr/local/bin/scrolllockd.sh >/dev/null <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
+
 log(){ logger -t keylights "$*"; }
 have(){ command -v "$1" >/dev/null 2>&1; }
+SETLEDS="$(command -v setleds || echo /usr/bin/setleds)"
+
 apply_led(){
   local any=0
-  if ls /sys/class/leds/*scrolllock* >/dev/null 2>&1; then
-    for led in /sys/class/leds/*scrolllock*; do
+  if ls /sys/class/leds/*scroll* >/dev/null 2>&1; then
+    for led in /sys/class/leds/*scroll*; do
       [ -w "$led/brightness" ] && echo 1 > "$led/brightness" 2>/dev/null || true
       any=1
     done
   fi
   for tty in /dev/tty[1-12]; do
-    [ -r "$tty" ] && /usr/bin/setleds -D +scroll < "$tty" 2>/dev/null || true
+    [ -r "$tty" ] && "$SETLEDS" -D +scroll < "$tty" 2>/dev/null || true
   done
-  [ "$any" = 0 ] && log "no scrolllock leds in sysfs; relying on setleds"
+  [ "$any" = 0 ] && log "no scroll leds in sysfs; relying on setleds"
 }
+
 burst(){
-  apply_led; usleep 20000
-  apply_led; usleep 40000
-  apply_led; usleep 60000
-  apply_led; usleep 80000
+  apply_led; sleep 0.02
+  apply_led; sleep 0.04
+  apply_led; sleep 0.06
+  apply_led; sleep 0.08
   apply_led
 }
+
 warmup(){
   local end=$(( $(date +%s) + 12 ))
   while [ "$(date +%s)" -lt "$end" ]; do
     burst
-    usleep 120000
+    sleep 0.12
   done
   log "warmup done"
 }
+
 aggressive_loop(){
   while true; do
     apply_led
-    usleep 120000
+    sleep 0.12
   done
 }
+
 watch_events(){
   if have udevadm && have awk && have stdbuf; then
     log "using udev monitor (leds+input)"
     /usr/bin/udevadm monitor --kernel --udev --subsystem-match=leds --subsystem-match=input | \
       stdbuf -oL awk '1' | while IFS= read -r _; do burst; done
   else
-    log "udev monitor unavailable; falling back to extra-fast bursts"
-    while true; do burst; usleep 80000; done
+    log "udev monitor unavailable; extra-fast bursts"
+    while true; do burst; sleep 0.08; done
   fi
 }
-ensure_tools(){
-  command -v setleds >/dev/null 2>&1 || { log "setleds missing"; exit 1; }
-  command -v usleep >/dev/null 2>&1 || { log "usleep missing (install coreutils)"; exit 1; }
-}
+
 case "${1-}" in
   --daemon)
-    ensure_tools
-    log "daemon starting (aggressive mode)"
+    log "daemon starting (aggressive)"
     warmup & aggressive_loop & watch_events
     wait
+    ;;
+  --apply)
+    apply_led
     ;;
   *)
     apply_led
@@ -89,17 +95,16 @@ SH
   sudo_wrap tee /etc/systemd/system/scrolllockd.service >/dev/null <<'UNIT'
 [Unit]
 Description=Scroll Lock backlight daemon (KeyLights - aggressive)
-After=systemd-udevd.service local-fs.target
+After=systemd-udevd.service local-fs.target getty.target
 Wants=systemd-udevd.service
 
 [Service]
 Type=simple
 ExecStartPre=/usr/bin/udevadm settle --timeout=10
+ExecStartPre=/usr/local/bin/scrolllockd.sh --apply
 ExecStart=/usr/local/bin/scrolllockd.sh --daemon
 Restart=always
 RestartSec=1
-IOSchedulingClass=idle
-CPUSchedulingPolicy=other
 Nice=10
 
 [Install]
@@ -108,7 +113,7 @@ UNIT
 
   sudo_wrap systemctl daemon-reload
   sudo_wrap systemctl enable --now scrolllockd.service
-  echo -e "${GREEN}KeyLights aggressive daemon installed and running.${NC}"
+  echo -e "${GREEN}KeyLights daemon installed and running.${NC}"
 }
 
 uninstall_all(){
