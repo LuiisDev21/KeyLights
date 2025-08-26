@@ -9,7 +9,6 @@ KeyLights is a lightweight utility for Linux that enables the backlight of gener
 ---
 
 ## Features
-- Toggles keyboard backlight via Scroll Lock.
 - Simple installation and removal.
 - Works on most generic keyboards tied to Scroll Lock.
 
@@ -49,8 +48,6 @@ KeyLights es una utilidad ligera para Linux que activa la retroiluminación de t
 ---
 
 ## Características
-
-* Control de retroiluminación mediante Scroll Lock.
 * Instalación y eliminación sencilla.
 * Compatible con teclados genéricos ligados a Scroll Lock.
 
