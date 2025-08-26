@@ -2,7 +2,6 @@
 set -euo pipefail
 
 GREEN="\033[1;32m"; YELLOW="\033[1;33m"; RED="\033[1;31m"; NC="\033[0m"
-
 need_cmd(){ command -v "$1" >/dev/null 2>&1; }
 sudo_wrap(){ if [[ $EUID -ne 0 ]]; then sudo "$@"; else "$@"; fi; }
 
@@ -23,8 +22,8 @@ install_core(){
 #!/usr/bin/env bash
 set -euo pipefail
 
-log(){ logger -t keylights "$*"; }
 have(){ command -v "$1" >/dev/null 2>&1; }
+log(){ if have logger; then logger -t keylights "$*"; else printf 'keylights: %s\n' "$*"; fi; }
 SETLEDS="$(command -v setleds || echo /usr/bin/setleds)"
 
 apply_led(){
@@ -38,7 +37,7 @@ apply_led(){
   for tty in /dev/tty[1-12]; do
     [ -r "$tty" ] && "$SETLEDS" -D +scroll < "$tty" 2>/dev/null || true
   done
-  [ "$any" = 0 ] && log "no scroll leds in sysfs; relying on setleds"
+  [ "$any" = 0 ] && log "no sysfs scroll leds; using setleds only"
 }
 
 burst(){
@@ -65,21 +64,32 @@ aggressive_loop(){
   done
 }
 
-watch_events(){
+watch_events_once(){
   if have udevadm && have awk && have stdbuf; then
-    log "using udev monitor (leds+input)"
-    /usr/bin/udevadm monitor --kernel --udev --subsystem-match=leds --subsystem-match=input | \
-      stdbuf -oL awk '1' | while IFS= read -r _; do burst; done
+    /usr/bin/udevadm monitor --kernel --udev --subsystem-match=leds --subsystem-match=input 2>/dev/null | stdbuf -oL awk '1' | while IFS= read -r _; do burst; done
+    return 0
   else
-    log "udev monitor unavailable; extra-fast bursts"
     while true; do burst; sleep 0.08; done
+  fi
+}
+
+watch_events_forever(){
+  if have udevadm && have awk && have stdbuf; then
+    while true; do
+      log "starting udev monitor"
+      watch_events_once || true
+      log "udev monitor ended; restarting in 1s"
+      sleep 1
+    done
+  else
+    watch_events_once
   fi
 }
 
 case "${1-}" in
   --daemon)
-    log "daemon starting (aggressive)"
-    warmup & aggressive_loop & watch_events
+    log "daemon start"
+    warmup & aggressive_loop & watch_events_forever
     wait
     ;;
   --apply)
@@ -94,7 +104,7 @@ SH
 
   sudo_wrap tee /etc/systemd/system/scrolllockd.service >/dev/null <<'UNIT'
 [Unit]
-Description=Scroll Lock backlight daemon (KeyLights - aggressive)
+Description=Scroll Lock backlight daemon (KeyLights - robust)
 After=systemd-udevd.service local-fs.target getty.target
 Wants=systemd-udevd.service
 
@@ -104,7 +114,7 @@ ExecStartPre=/usr/bin/udevadm settle --timeout=10
 ExecStartPre=/usr/local/bin/scrolllockd.sh --apply
 ExecStart=/usr/local/bin/scrolllockd.sh --daemon
 Restart=always
-RestartSec=1
+RestartSec=2
 Nice=10
 
 [Install]
