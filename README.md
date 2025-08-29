@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform: Linux](https://img.shields.io/badge/platform-Linux-green.svg)]()
 [![Status: Stable](https://img.shields.io/badge/status-stable-brightgreen.svg)]()
-
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/LuiisDev21/KeyLights)
 KeyLights is a lightweight utility for Linux that enables the backlight of generic keyboards which depend on the **Scroll Lock** state.
 
 ---
